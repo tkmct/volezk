@@ -14,7 +14,7 @@ pub(crate) trait AbstractChannel {
     fn clone(&self) -> Self;
 }
 
-pub(crate) struct Channel<R, W> {
+pub struct Channel<R, W> {
     reader: Rc<RefCell<R>>,
     writer: Rc<RefCell<W>>,
 }
@@ -29,11 +29,18 @@ pub enum ChannelError {
 }
 
 impl<R: Read, W: Write> Channel<R, W> {
-    fn reader(self) -> Rc<RefCell<R>> {
+    pub fn new(reader: R, writer: W) -> Self {
+        Self {
+            reader: Rc::new(RefCell::new(reader)),
+            writer: Rc::new(RefCell::new(writer)),
+        }
+    }
+
+    pub fn reader(self) -> Rc<RefCell<R>> {
         self.reader
     }
 
-    fn writer(self) -> Rc<RefCell<W>> {
+    pub fn writer(self) -> Rc<RefCell<W>> {
         self.writer
     }
 }
