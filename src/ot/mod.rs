@@ -1,17 +1,30 @@
 //! Implement 1-of-n oblivious transfer trait
+use ark_serialize::SerializationError;
+
+use crate::channel::ChannelError;
+
 mod co15;
 
-use crate::channel::AbstractChannel;
-
 #[derive(thiserror::Error, Debug)]
-pub enum OTError {}
+pub enum OTError {
+    #[error(transparent)]
+    Serialize {
+        #[from]
+        source: SerializationError,
+    },
+    #[error(transparent)]
+    Channel {
+        #[from]
+        source: ChannelError,
+    },
+}
 
 type OTResult<T> = Result<T, OTError>;
 
 pub trait OTSender<const N: usize> {
-    fn send<C: AbstractChannel, T>(&self, channel: &mut C, values: [T; N]) -> OTResult<T>;
+    fn send<T>(&self, values: [T; N]) -> OTResult<T>;
 }
 
 pub trait OTReceiver {
-    fn receive<C: AbstractChannel, T>(&self, channel: &mut C, choice: usize) -> OTResult<T>;
+    fn receive<T>(&self, choice: usize) -> OTResult<T>;
 }

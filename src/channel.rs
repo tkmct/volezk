@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-pub(crate) trait AbstractChannel {
+pub trait AbstractChannel {
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), ChannelError>;
 
     fn read_bytes(&mut self, bytes: &mut [u8]) -> Result<(), ChannelError>;
