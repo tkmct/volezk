@@ -1,5 +1,6 @@
 //! Implement 1-of-n oblivious transfer trait
 use ark_serialize::SerializationError;
+use ark_std::rand::Rng;
 
 use crate::channel::ChannelError;
 
@@ -22,7 +23,7 @@ pub enum OTError {
 type OTResult<T> = Result<T, OTError>;
 
 pub trait OTSender<const N: usize> {
-    fn send<T>(&self, values: [T; N]) -> OTResult<T>;
+    fn send<T, R: Rng>(&self, values: [T; N], rng: &mut R) -> OTResult<T>;
 }
 
 pub trait OTReceiver {

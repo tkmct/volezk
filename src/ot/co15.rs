@@ -5,7 +5,7 @@ use ark_ec::{twisted_edwards::TECurveConfig, CurveConfig, CurveGroup};
 use ark_ed25519::{EdwardsConfig, EdwardsProjective as G};
 use ark_ff::{Field, Fp, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{rand::Rng, UniformRand, Zero};
+use ark_std::{rand::Rng, UniformRand};
 
 use crate::channel::AbstractChannel;
 
@@ -42,17 +42,22 @@ impl<C: AbstractChannel> CO15Sender<C> {
 }
 
 impl<C: AbstractChannel, const N: usize> OTSender<N> for CO15Sender<C> {
-    fn send<T>(&self, values: [T; N]) -> OTResult<T> {
-        // Samples y from Z_p
-        // Compute S = yB, T = yS
-        // where B is a generator of a prime group.
-        // send S to receiver
-        //
-        // samples x from Z_p
-        //
+    fn send<T, R: Rng>(&self, values: [T; N], rng: &mut R) -> OTResult<T> {
+        // sample x from Z_p for N times
+        // x is a scaler
+        let xs: [Zp; N] = std::array::from_fn(|_| Zp::rand(rng));
+        let b = EdwardsConfig::GENERATOR;
+
         // Compute R = cS + xB
         // where c is a choice
-        //
+        let rs = xs
+            .iter()
+            .enumerate()
+            .map(|(i, x)| self.s * Zp::from(i as u32) + b * x)
+            .collect::<Vec<_>>();
+
+        // send rs to Receiver
+
         //
         // Group G is subset of points over twisted Edwards curve.
         // −x^2 + y^2 = 1 + d x^2 y^2
@@ -95,11 +100,9 @@ mod tests {
         os::unix::net::UnixStream,
     };
 
-    use ark_ec::{twisted_edwards::TECurveConfig, CurveConfig, CurveGroup};
+    use ark_ec::{twisted_edwards::TECurveConfig, CurveConfig};
     use ark_ed25519::{EdwardsConfig, EdwardsProjective as G};
-    use ark_ff::{Field, Fp, PrimeField};
     use ark_std::test_rng;
-    use ark_std::{UniformRand, Zero};
 
     use super::*;
     use crate::channel::Channel;
@@ -134,15 +137,24 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn test_1() -> Result<(), Box<dyn std::error::Error>> {
         // let mut rng = test_rng();
 
         let b = EdwardsConfig::GENERATOR;
         // let scalar = <EdwardsConfig as CurveConfig>::ScalarField::rand(&mut rng);
         let two = <EdwardsConfig as CurveConfig>::ScalarField::from(2);
 
-        // let s = b * two;
+        let s = b * two;
 
         assert_eq!(b * two, b + b);
+
+        let mut buff = Vec::new();
+        s.serialize_compressed(&mut buff)?;
+
+        let c = G::deserialize_compressed(&*buff)?;
+
+        assert_eq!(s, c);
+
+        Ok(())
     }
 }
