@@ -1,6 +1,5 @@
 //! This module implements oblivious trasnfer implementation described in
 //! https://eprint.iacr.org/2015/267.pdf by Tung Chou and Claudio Orlandi
-
 use ark_ec::{twisted_edwards::TECurveConfig, CurveConfig, CurveGroup};
 use ark_ed25519::{EdwardsConfig, EdwardsProjective as G};
 use ark_ff::{Field, Fp, PrimeField};
@@ -23,6 +22,11 @@ pub struct CO15Sender<C: AbstractChannel> {
 
 impl<C: AbstractChannel> CO15Sender<C> {
     pub fn setup<R: Rng>(mut channel: C, rng: &mut R) -> OTResult<Self> {
+        // Group G is subset of points over twisted Edwards curve.
+        // −x^2 + y^2 = 1 + d x^2 y^2
+        // constant d and generator B can be found in https://eprint.iacr.org/2011/368.pdf
+        // the implementation comes from ark-works/ed25519
+        //
         // Samples y from Z_p
         let y = Zp::rand(rng);
         let b = EdwardsConfig::GENERATOR;
@@ -41,29 +45,13 @@ impl<C: AbstractChannel> CO15Sender<C> {
     }
 }
 
-impl<C: AbstractChannel, const N: usize> OTSender<N> for CO15Sender<C> {
-    fn send<T, R: Rng>(&self, values: [T; N], rng: &mut R) -> OTResult<T> {
-        // sample x from Z_p for N times
-        // x is a scaler
-        let xs: [Zp; N] = std::array::from_fn(|_| Zp::rand(rng));
-        let b = EdwardsConfig::GENERATOR;
+impl<C: AbstractChannel> OTSender for CO15Sender<C> {
+    fn send<const N: usize, T, R: Rng>(&mut self, values: [T; N], rng: &mut R) -> OTResult<T> {
+        // Receive rs from receiver
+        let mut buff = Vec::new();
+        self.channel.read_bytes(&mut buff)?;
 
-        // Compute R = cS + xB
-        // where c is a choice
-        let rs = xs
-            .iter()
-            .enumerate()
-            .map(|(i, x)| self.s * Zp::from(i as u32) + b * x)
-            .collect::<Vec<_>>();
-
-        // send rs to Receiver
-
-        //
-        // Group G is subset of points over twisted Edwards curve.
-        // −x^2 + y^2 = 1 + d x^2 y^2
-        // constant d and generator B can be found in https://eprint.iacr.org/2011/368.pdf
-        // the implementation comes from ark-works/ed25519
-        // d =
+        // generate keys using rs
 
         todo!()
     }
@@ -88,7 +76,24 @@ impl<C: AbstractChannel> CO15Receiver<C> {
 }
 
 impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
-    fn receive<T>(&self, choice: usize) -> OTResult<T> {
+    fn receive<const N: usize, T, R: Rng>(&mut self, choice: usize, rng: &mut R) -> OTResult<T> {
+        // sample x from Z_p for N times
+        // Compute R = cS + xB
+        // where c is a choice
+        let xs: [Zp; N] = std::array::from_fn(|_| Zp::rand(rng));
+        let b = EdwardsConfig::GENERATOR;
+
+        let rs = xs
+            .iter()
+            .enumerate()
+            .map(|(i, x)| self.s * Zp::from(i as u32) + b * x)
+            .collect::<Vec<_>>();
+
+        // send rs to Receiver
+        let mut buff = Vec::new();
+        rs.serialize_compressed(&mut buff)?;
+        self.channel.write_bytes(&buff)?;
+
         todo!()
     }
 }
@@ -100,6 +105,8 @@ mod tests {
         os::unix::net::UnixStream,
     };
 
+    use rand::prelude::{thread_rng, ThreadRng};
+
     use ark_ec::{twisted_edwards::TECurveConfig, CurveConfig};
     use ark_ed25519::{EdwardsConfig, EdwardsProjective as G};
     use ark_std::test_rng;
@@ -110,28 +117,32 @@ mod tests {
     #[test]
     #[ignore]
     fn test_ot() -> Result<(), Box<dyn std::error::Error>> {
-        let mut rng = test_rng();
+        let mut rng = thread_rng();
         let (sender, receiver) = UnixStream::pair().unwrap();
 
         // Prepare sender
         let reader = BufReader::new(sender.try_clone().unwrap());
         let writer = BufWriter::new(sender);
         let sender_channel = Channel::new(reader, writer);
-        let ot_sender = CO15Sender::setup(sender_channel, &mut rng)?;
+        let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng)?;
 
         // Preapre receiver
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
         let receiver_channel = Channel::new(reader, writer);
-        let ot_receiver = CO15Receiver::setup(receiver_channel)?;
+        let mut ot_receiver =
+            CO15Receiver::<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>::setup(
+                receiver_channel,
+            )?;
 
         let values: [u32; 2] = [1, 100];
         let choice = 1;
 
-        ot_sender.send(values)?;
-        let receive_result = ot_receiver.receive::<u32>(choice)?;
+        ot_sender.send(values, &mut rng)?;
+        let receive_result: OTResult<u32> =
+            ot_receiver.receive::<2, u32, ThreadRng>(choice, &mut rng);
 
-        assert_eq!(receive_result, 100);
+        assert_eq!(receive_result.unwrap(), 100);
 
         Ok(())
     }
