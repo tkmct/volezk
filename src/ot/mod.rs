@@ -23,7 +23,7 @@ pub enum OTError {
 type OTResult<T> = Result<T, OTError>;
 
 pub trait OTSender {
-    fn send<const N: usize, T, R: Rng>(&mut self, values: [T; N], rng: &mut R) -> OTResult<T>;
+    fn send<const N: usize, T, R: Rng>(&mut self, values: [T; N], rng: &mut R) -> OTResult<()>;
 }
 
 pub trait OTReceiver {
