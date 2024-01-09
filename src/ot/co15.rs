@@ -42,11 +42,12 @@ impl<C: AbstractChannel> CO15Sender<C> {
 
 impl<C: AbstractChannel> OTSender for CO15Sender<C> {
     fn send<const N: usize, T, R: Rng>(&mut self, values: [T; N], rng: &mut R) -> OTResult<()> {
-        // Receive rs from receiver
-        let mut buff = Vec::new();
-        self.channel.read_bytes(&mut buff)?;
+        // Receive r from receiver
+        let r = self.channel.read_g()?;
 
-        // generate keys using rs
+        // calculate keys using r
+        // k_j = H (S,R )(yR − jT)
+        // let keys = (0..N).map(|j| hash(s, r, yr - jt)).collect::<Vec<_>>();
 
         todo!()
     }
@@ -58,7 +59,7 @@ pub struct CO15Receiver<C: AbstractChannel> {
 }
 
 impl<C: AbstractChannel> CO15Receiver<C> {
-    fn setup(mut channel: C) -> OTResult<Self> {
+    pub fn setup(mut channel: C) -> OTResult<Self> {
         // setup something
         // receive s value from sender
         let s = channel.read_g()?;
@@ -71,19 +72,10 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
         // sample x from Z_p for N times
         // Compute R = cS + xB
         // where c is a choice
-        let xs: [Zp; N] = std::array::from_fn(|_| Zp::rand(rng));
+        let x = Zp::rand(rng);
         let b = EdwardsConfig::GENERATOR;
-
-        let rs = xs
-            .iter()
-            .enumerate()
-            .map(|(i, x)| self.s * Zp::from(i as u32) + b * x)
-            .collect::<Vec<_>>();
-
-        // send rs to Receiver
-        let mut buff = Vec::new();
-        rs.serialize_compressed(&mut buff)?;
-        self.channel.write_bytes(&buff)?;
+        let r = self.s * Zp::from(choice as u32) + b * x;
+        self.channel.write_g(r)?;
 
         todo!()
     }
