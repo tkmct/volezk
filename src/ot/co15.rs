@@ -1,5 +1,9 @@
 //! This module implements oblivious trasnfer implementation described in
 //! https://eprint.iacr.org/2015/267.pdf by Tung Chou and Claudio Orlandi
+use aes::cipher::generic_array::sequence::GenericSequence;
+use aes::cipher::{generic_array::GenericArray, BlockCipher, BlockDecrypt, BlockEncrypt, KeyInit};
+use aes::Aes256;
+
 use ark_ec::twisted_edwards::TECurveConfig;
 use ark_ed25519::EdwardsConfig;
 use ark_serialize::CanonicalSerialize;
@@ -36,9 +40,8 @@ impl<C: AbstractChannel> CO15Sender<C> {
 
         // Send s to receiver
         channel.write_g(s)?;
-        println!("reading g ");
+        channel.flush()?;
         let g = channel.read_g()?;
-        println!("read g {:?}", g);
 
         Ok(Self { channel, y, s, t })
     }
@@ -72,7 +75,10 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
                 k.serialize_compressed(&mut buff)?;
 
                 hasher.update(buff);
-                Ok(hasher.finalize())
+                let key = hasher.finalize();
+
+                let cipher = Aes256::new(&key);
+                cipher.encrypt_block(values[j].into())
             })
             .collect::<OTResult<Vec<_>>>()?;
 
@@ -92,7 +98,7 @@ impl<C: AbstractChannel> CO15Receiver<C> {
         // setup something
         // receive s value from sender
         let s = channel.read_g()?;
-        println!("writing g");
+        channel.flush()?;
         channel.write_g(s)?;
 
         Ok(Self { channel, s })
@@ -108,6 +114,29 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
         let b = EdwardsConfig::GENERATOR;
         let r = self.s * Zp::from(choice as u32) + b * x;
         self.channel.write_g(r)?;
+
+        let k = self.s * x;
+
+        // calculate key
+        let mut r_buff = Vec::new();
+        let mut s_buff = Vec::new();
+        let mut k_buff = Vec::new();
+
+        r.serialize_compressed(&mut r_buff)?;
+        self.s.serialize_compressed(&mut s_buff)?;
+        k.serialize_compressed(&mut k_buff)?;
+
+        let mut hasher = Keccak256::default();
+        hasher.update(s_buff);
+        hasher.update(r_buff);
+        hasher.update(k_buff);
+
+        let key = hasher.finalize();
+
+        // encrypted values from sender
+        // std::array::from_fn(|i| {
+        //     self.channel.read_bytes();
+        // });
 
         todo!()
     }
@@ -153,8 +182,7 @@ mod tests {
         let sender_channel = Channel::new(reader, writer);
         let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
         let values: [u32; 2] = [1, 100];
-        println!("sender send");
-        ot_sender.send(values, &mut rng);
+        ot_sender.send(values, &mut rng)?;
         // });
 
         let sender_result = receiver_handle.join();
