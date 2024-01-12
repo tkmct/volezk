@@ -1,6 +1,5 @@
 //! This module implements oblivious trasnfer implementation described in
 //! https://eprint.iacr.org/2015/267.pdf by Tung Chou and Claudio Orlandi
-use aes::cipher::generic_array::sequence::GenericSequence;
 use aes::cipher::{generic_array::GenericArray, BlockCipher, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes256;
 
@@ -48,7 +47,7 @@ impl<C: AbstractChannel> CO15Sender<C> {
 }
 
 impl<C: AbstractChannel> OTSender for CO15Sender<C> {
-    fn send<const N: usize, T, R: Rng>(&mut self, values: [T; N], rng: &mut R) -> OTResult<()> {
+    fn send<const N: usize, T: Block + Clone>(&mut self, values: [T; N]) -> OTResult<()> {
         // Receive r from receiver
         println!("receive r");
         let r = self.channel.read_g()?;
@@ -67,24 +66,23 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
         // Receive r from receiver
         // calculate keys using r
         // k_j = H (S,R )(yR − jT)
-        let keys = (0..N)
-            .map(|j| {
-                let mut hasher = hasher.clone();
-                let k = r * self.y - self.t * Zp::from(j as u32);
-                let mut buff = Vec::new();
-                k.serialize_compressed(&mut buff)?;
+        for i in 0..N {
+            let mut hasher = hasher.clone();
+            let k = r * self.y - self.t * Zp::from(i as u32);
+            let mut buff = Vec::new();
+            k.serialize_compressed(&mut buff)?;
 
-                hasher.update(buff);
-                let key = hasher.finalize();
+            hasher.update(buff);
+            let key = hasher.finalize();
 
-                let cipher = Aes256::new(&key);
-                cipher.encrypt_block(values[j].into())
-            })
-            .collect::<OTResult<Vec<_>>>()?;
+            let mut v = values[i].clone();
 
-        println!("keys: {:?}", keys);
+            v.encrypt(&key.into());
+            // send ciphertext to receiver
+            self.channel.write_bytes(v.as_bytes()).unwrap();
+        }
 
-        todo!()
+        Ok(())
     }
 }
 
@@ -106,7 +104,11 @@ impl<C: AbstractChannel> CO15Receiver<C> {
 }
 
 impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
-    fn receive<const N: usize, T, R: Rng>(&mut self, choice: usize, rng: &mut R) -> OTResult<T> {
+    fn receive<const N: usize, T: Block + Clone, R: Rng>(
+        &mut self,
+        choice: usize,
+        rng: &mut R,
+    ) -> OTResult<T> {
         // sample x from Z_p for N times
         // Compute R = cS + xB
         // where c is a choice
@@ -134,11 +136,19 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
         let key = hasher.finalize();
 
         // encrypted values from sender
-        // std::array::from_fn(|i| {
-        //     self.channel.read_bytes();
-        // });
+        let ciphertexts: [T; N] = std::array::from_fn(|_| {
+            let mut bytes = vec![];
+            // TODO: handle result correctly
+            self.channel.read_bytes(&mut bytes).unwrap();
+            T::from_bytes(&bytes)
+        });
 
-        todo!()
+        // decipher the choice ciphertext
+        let mut dest = ciphertexts[choice].clone();
+        dest.decrypt(&key.into());
+        // TODO: handle the result
+
+        Ok(dest)
     }
 }
 
@@ -167,11 +177,8 @@ mod tests {
             let receiver_channel = Channel::new(reader, writer);
             let mut ot_receiver = CO15Receiver::setup(receiver_channel).unwrap();
 
-            let values: [u32; 2] = [1, 100];
             let choice = 1;
-
-            // ot_sender.send(values, &mut rng)?;
-            let receive_result = ot_receiver.receive::<2, u32, ThreadRng>(choice, &mut rng);
+            ot_receiver.receive::<2, Block128, ThreadRng>(choice, &mut rng)
         });
 
         // let sender_handle = thread::spawn(move || {
@@ -181,17 +188,13 @@ mod tests {
         let writer = BufWriter::new(sender);
         let sender_channel = Channel::new(reader, writer);
         let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
-        let values: [u32; 2] = [1, 100];
-        ot_sender.send(values, &mut rng)?;
+        let values: [Block128; 2] = [Block128::from(1), Block128::from(100)];
+        ot_sender.send(values)?;
         // });
 
-        let sender_result = receiver_handle.join();
-        assert!(sender_result.is_ok());
-        let s = sender_result.unwrap();
-
-        // assert_eq!(s, ot_receiver.s);
-
-        // println!("sender {:?}, receiver {:?}", s, ot_receiver.s);
+        let receiver_result = receiver_handle.join().unwrap();
+        assert!(receiver_result.is_ok());
+        assert_eq!(receiver_result.unwrap(), values[1]);
 
         Ok(())
     }
