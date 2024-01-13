@@ -40,7 +40,6 @@ impl<C: AbstractChannel> CO15Sender<C> {
         // Send s to receiver
         channel.write_g(s)?;
         channel.flush()?;
-        let g = channel.read_g()?;
 
         Ok(Self { channel, y, s, t })
     }
@@ -97,7 +96,6 @@ impl<C: AbstractChannel> CO15Receiver<C> {
         // receive s value from sender
         let s = channel.read_g()?;
         channel.flush()?;
-        channel.write_g(s)?;
 
         Ok(Self { channel, s })
     }
