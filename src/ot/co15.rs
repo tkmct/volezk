@@ -154,10 +154,15 @@ mod tests {
     use rand::prelude::{thread_rng, ThreadRng};
 
     use super::*;
-    use crate::channel::Channel;
+    use crate::{channel::Channel, ot::OTError};
+
+    use ark_ec::twisted_edwards::TECurveConfig;
+    use ark_ed25519::EdwardsConfig;
+    use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+    use ark_std::UniformRand;
 
     #[test]
-    fn test_ot() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_ot_block128() -> Result<(), Box<dyn std::error::Error>> {
         let (sender, receiver) = UnixStream::pair().unwrap();
 
         // Preapre receiver
@@ -184,6 +189,64 @@ mod tests {
         let receiver_result = receiver_handle.join().unwrap();
         assert!(receiver_result.is_ok());
         assert_eq!(receiver_result.unwrap(), values[1]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ot_block256() -> Result<(), Box<dyn std::error::Error>> {
+        // 1 out-of 5 OT with points on G
+
+        let (sender, receiver) = UnixStream::pair().unwrap();
+
+        // Preapre receiver
+        let receiver_handle = thread::spawn(move || {
+            let mut rng = thread_rng();
+            let reader = BufReader::new(receiver.try_clone().unwrap());
+            let writer = BufWriter::new(receiver);
+            let receiver_channel = Channel::new(reader, writer);
+            let mut ot_receiver = CO15Receiver::setup(receiver_channel).unwrap();
+
+            let choice = 3;
+            let res = ot_receiver
+                .receive::<2, Block256, ThreadRng>(choice, &mut rng)
+                .unwrap();
+            let g = G::deserialize_compressed(res.as_bytes());
+            g
+        });
+
+        // Prepare sender
+        let mut rng = thread_rng();
+        let reader = BufReader::new(sender.try_clone().unwrap());
+        let writer = BufWriter::new(sender);
+        let sender_channel = Channel::new(reader, writer);
+        let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
+
+        let mut rng = thread_rng();
+        let b = EdwardsConfig::GENERATOR;
+
+        let points: [G; 5] = std::array::from_fn(|_| {
+            let y = Zp::rand(&mut rng);
+            b * y
+        });
+
+        let values: [Block256; 5] = points
+            .iter()
+            .map(|g| {
+                let mut bytes = Vec::new();
+                g.serialize_compressed(&mut bytes)?;
+
+                Ok(Block256::from_bytes(&bytes))
+            })
+            .collect::<Result<Vec<_>, OTError>>()?
+            .try_into()
+            .unwrap();
+
+        ot_sender.send(values)?;
+
+        let receiver_result = receiver_handle.join().unwrap();
+        assert!(receiver_result.is_ok());
+        assert_eq!(receiver_result.unwrap(), points[3]);
 
         Ok(())
     }
