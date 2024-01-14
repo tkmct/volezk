@@ -1,7 +1,8 @@
-use aes::cipher::{generic_array::GenericArray, BlockCipher, BlockDecrypt, BlockEncrypt, KeyInit};
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes256;
 use ark_ec::CurveConfig;
 use ark_ed25519::{EdwardsConfig, EdwardsProjective};
+use std::default::Default;
 
 #[derive(thiserror::Error, Debug)]
 enum BlockError {}
@@ -14,6 +15,7 @@ pub trait IsZero {
 }
 
 pub trait Block {
+    const BYTES_LEN: usize;
     // Encrypt in-place using AES256
     fn encrypt(&self, key: &[u8; 32]) -> Self;
 
@@ -25,10 +27,12 @@ pub trait Block {
 }
 
 /// 128 bit data chunk
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Block128([u8; 16]);
 
 impl Block for Block128 {
+    const BYTES_LEN: usize = 16;
+
     fn encrypt(&self, key: &[u8; 32]) -> Self {
         let g_key = GenericArray::from(*key);
         let cipher = Aes256::new(&g_key);
@@ -86,10 +90,12 @@ impl From<[u8; 16]> for Block128 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Block256([Block128; 2]);
 
 impl Block for Block256 {
+    const BYTES_LEN: usize = 32;
+
     fn encrypt(&self, key: &[u8; 32]) -> Self {
         todo!()
     }
@@ -130,19 +136,17 @@ impl From<[u8; 32]> for Block256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha3::{Digest, Keccak256};
 
     #[test]
     fn test_cast_block256() {
-        let val = [0u8; 32];
-
-        let block = Block256::from(val);
+        let block = Block256::from([0u8; 32]);
         assert!(block.is_zero());
     }
 
     #[test]
     fn test_block128_from_bytes() {
-        let val = [1u8; 12];
-        let block = Block128::from_bytes(&val);
+        let block = Block128::from_bytes(&[1u8; 12]);
         assert_eq!(block.0, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,]);
     }
 
@@ -151,5 +155,20 @@ mod tests {
         let val = [1u8; 18];
         let block = Block128::from_bytes(&val);
         assert_eq!(block.0, [1u8; 16]);
+    }
+
+    #[test]
+    fn test_block128_encrypt_decrypt() {
+        let block = Block128::from_bytes(&[1u8; 16]);
+        let key = {
+            let mut hasher = Keccak256::default();
+            hasher.update(b"Key");
+            hasher.finalize()
+        };
+
+        let encrypted = block.encrypt(&key.into());
+        let decrypted = encrypted.decrypt(&key.into());
+
+        assert_eq!(decrypted, block);
     }
 }
