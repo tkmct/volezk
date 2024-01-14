@@ -72,7 +72,7 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
             let encrypted = v.encrypt(&key.into());
 
             // send ciphertext to receiver
-            self.channel.write_bytes(encrypted.as_bytes()).unwrap();
+            self.channel.write_bytes(&encrypted.as_bytes()).unwrap();
             self.channel.flush()?;
         }
 
@@ -209,9 +209,9 @@ mod tests {
 
             let choice = 3;
             let res = ot_receiver
-                .receive::<2, Block256, ThreadRng>(choice, &mut rng)
+                .receive::<5, Block256, ThreadRng>(choice, &mut rng)
                 .unwrap();
-            let g = G::deserialize_compressed(res.as_bytes());
+            let g = G::deserialize_compressed(res.as_bytes().as_slice());
             g
         });
 

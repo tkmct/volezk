@@ -21,7 +21,7 @@ pub trait Block {
 
     fn decrypt(&self, key: &[u8; 32]) -> Self;
 
-    fn as_bytes(&self) -> &[u8];
+    fn as_bytes(&self) -> Vec<u8>;
 
     fn from_bytes(bytes: &[u8]) -> Self;
 }
@@ -53,8 +53,8 @@ impl Block for Block128 {
         Self(g_val.try_into().unwrap())
     }
 
-    fn as_bytes(&self) -> &[u8] {
-        &self.0
+    fn as_bytes(&self) -> Vec<u8> {
+        self.0.to_vec()
     }
 
     /// Convert slice of byte into 128bit chunked block.
@@ -97,19 +97,40 @@ impl Block for Block256 {
     const BYTES_LEN: usize = 32;
 
     fn encrypt(&self, key: &[u8; 32]) -> Self {
-        todo!()
+        let b_0 = self.0[0].encrypt(key);
+        let b_1 = self.0[1].encrypt(key);
+        Self([b_0, b_1])
     }
 
     fn decrypt(&self, key: &[u8; 32]) -> Self {
-        todo!()
+        let b_0 = self.0[0].decrypt(key);
+        let b_1 = self.0[1].decrypt(key);
+        Self([b_0, b_1])
     }
 
-    fn as_bytes(&self) -> &[u8] {
-        todo!()
+    fn as_bytes(&self) -> Vec<u8> {
+        self.0
+            .iter()
+            .map(|b| b.as_bytes())
+            .collect::<Vec<_>>()
+            .concat()
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
-        todo!()
+        // check input length
+        if bytes.len() < 32 {
+            let mut dst = [0u8; 32];
+            dst[..bytes.len()].copy_from_slice(bytes);
+            Self([
+                Block128::from_bytes(&dst[0..16]),
+                Block128::from_bytes(&dst[16..32]),
+            ])
+        } else {
+            Self([
+                Block128::from_bytes(&bytes[0..16]),
+                Block128::from_bytes(&bytes[16..32]),
+            ])
+        }
     }
 }
 
