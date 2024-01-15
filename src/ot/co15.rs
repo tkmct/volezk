@@ -6,7 +6,7 @@ use ark_serialize::CanonicalSerialize;
 use ark_std::{rand::Rng, UniformRand};
 use sha3::{Digest, Keccak256};
 
-use crate::{channel::AbstractChannel, types::*};
+use crate::{block::*, channel::AbstractChannel, types::*};
 
 use super::{OTReceiver, OTResult, OTSender};
 

@@ -2,7 +2,7 @@
 use ark_serialize::SerializationError;
 use ark_std::rand::Rng;
 
-use crate::{channel::ChannelError, types::*};
+use crate::{block::Block, channel::ChannelError};
 
 mod co15;
 
