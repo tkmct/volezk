@@ -5,6 +5,7 @@ use ark_std::rand::Rng;
 use crate::{block::Block, channel::ChannelError};
 
 mod co15;
+mod extension;
 
 #[derive(thiserror::Error, Debug)]
 pub enum OTError {
@@ -33,4 +34,27 @@ pub trait OTReceiver {
     where
         T: Block + Clone + Copy + Default,
         R: Rng;
+}
+
+/// Random OT sender
+pub trait ROTSingleSender {
+    fn send<const N: usize, T>(&mut self) -> OTResult<[T; N]>;
+}
+
+/// Random OT receiver
+pub trait ROTSingleReceiver {
+    fn receive<const N: usize, T, R>(&mut self, choice: usize) -> OTResult<T>;
+}
+
+/// Random OT to send M items
+pub trait ROTMultiSender {
+    fn send<const N: usize, const M: usize, T>(&mut self) -> OTResult<[[T; N]; M]>;
+}
+
+/// Random OT to receive M items
+pub trait ROTMultiReceiver {
+    fn receive<const N: usize, const M: usize, T, R>(
+        &mut self,
+        choices: [usize; M],
+    ) -> OTResult<[T; M]>;
 }
