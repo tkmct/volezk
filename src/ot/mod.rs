@@ -37,24 +37,11 @@ pub trait OTReceiver {
 }
 
 /// Random OT sender
-pub trait ROTSingleSender {
+pub trait ROTSender {
     fn send<const N: usize, T>(&mut self) -> OTResult<[T; N]>;
 }
 
 /// Random OT receiver
-pub trait ROTSingleReceiver {
+pub trait ROTReceiver {
     fn receive<const N: usize, T, R>(&mut self, choice: usize) -> OTResult<T>;
-}
-
-/// Random OT to send M items
-pub trait ROTMultiSender {
-    fn send<const N: usize, const M: usize, T>(&mut self) -> OTResult<[[T; N]; M]>;
-}
-
-/// Random OT to receive M items
-pub trait ROTMultiReceiver {
-    fn receive<const N: usize, const M: usize, T, R>(
-        &mut self,
-        choices: [usize; M],
-    ) -> OTResult<[T; M]>;
 }

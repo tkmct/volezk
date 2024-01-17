@@ -143,6 +143,13 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
     }
 }
 
+//
+// Implement ROT of CO15
+//
+pub struct CO15ROTSender {}
+
+pub struct CO15ROTReceiver {}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -250,4 +257,7 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_rot() {}
 }
