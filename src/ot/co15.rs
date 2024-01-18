@@ -8,7 +8,7 @@ use sha3::{Digest, Keccak256};
 
 use crate::{block::*, channel::AbstractChannel, types::*};
 
-use super::{OTReceiver, OTResult, OTSender};
+use super::{OTReceiver, OTResult, OTSender, ROTReceiver, ROTSender};
 
 pub struct CO15Sender<C: AbstractChannel> {
     channel: C,
@@ -80,6 +80,39 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
     }
 }
 
+impl<C: AbstractChannel> ROTSender for CO15Sender<C> {
+    fn send_random<const N: usize, T: Block>(&mut self) -> OTResult<[T; N]> {
+        // Receive r from receiver
+        let r = self.channel.read_g()?;
+
+        let mut r_buff = Vec::new();
+        let mut s_buff = Vec::new();
+
+        r.serialize_compressed(&mut r_buff)?;
+        self.s.serialize_compressed(&mut s_buff)?;
+
+        let mut hasher = Keccak256::default();
+        hasher.update(s_buff);
+        hasher.update(r_buff);
+
+        // Receive r from receiver
+        // calculate keys using r
+        // k_j = H (S,R )(yR − jT)
+        let keys: [T; N] = std::array::from_fn(|i| {
+            let mut hasher = hasher.clone();
+            let k = r * self.y - self.t * Zp::from(i as u32);
+            let mut buff = Vec::new();
+            k.serialize_compressed(&mut buff).unwrap();
+
+            hasher.update(buff);
+            let key = hasher.finalize();
+            T::from_bytes(&key)
+        });
+
+        Ok(keys)
+    }
+}
+
 pub struct CO15Receiver<C: AbstractChannel> {
     channel: C,
     s: G,
@@ -143,12 +176,41 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
     }
 }
 
-//
-// Implement ROT of CO15
-//
-pub struct CO15ROTSender {}
+impl<C: AbstractChannel> ROTReceiver for CO15Receiver<C> {
+    fn receive_random<const N: usize, T: Block, R: Rng>(
+        &mut self,
+        choice: usize,
+        rng: &mut R,
+    ) -> OTResult<T> {
+        // sample x from Z_p for N times
+        // Compute R = cS + xB
+        // where c is a choice
+        let x = Zp::rand(rng);
+        let b = EdwardsConfig::GENERATOR;
+        let r = self.s * Zp::from(choice as u32) + b * x;
+        self.channel.write_g(r)?;
+        self.channel.flush()?;
 
-pub struct CO15ROTReceiver {}
+        let k = self.s * x;
+
+        // calculate key
+        let mut r_buff = Vec::new();
+        let mut s_buff = Vec::new();
+        let mut k_buff = Vec::new();
+
+        r.serialize_compressed(&mut r_buff)?;
+        self.s.serialize_compressed(&mut s_buff)?;
+        k.serialize_compressed(&mut k_buff)?;
+
+        let mut hasher = Keccak256::default();
+        hasher.update(s_buff);
+        hasher.update(r_buff);
+        hasher.update(k_buff);
+
+        let key = hasher.finalize();
+        Ok(T::from_bytes(&key))
+    }
+}
 
 #[cfg(test)]
 mod tests {
