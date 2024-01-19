@@ -319,7 +319,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[test]
-    fn test_rot() {}
 }
