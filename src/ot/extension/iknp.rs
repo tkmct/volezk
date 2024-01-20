@@ -1,24 +1,49 @@
 //! Implements IKNP oblivious transfer extension
 //! Refer: https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf
 use ark_std::rand::Rng;
+use rand::prelude::thread_rng;
 
 use crate::{
     block::Block,
     ot::{OTResult, ROTReceiver, ROTSender},
 };
 
-fn ot_ext_send<Sender: ROTSender, T, const M: usize>(
-    sender: &mut Sender,
+/// Key size. Base of will be performed for K times to send M keys.
+const K: usize = 128;
+
+fn ot_ext_send<Receiver: ROTReceiver, T, const M: usize>(
+    receiver: &mut Receiver,
     values: [[T; 2]; M],
 ) -> OTResult<()> {
     todo!()
+    // K OT for M bits messages where K is key length = 128.
+    // Ext sender acts as an OT receiver
 }
 
-fn ot_ext_receive<Receiver: ROTReceiver, T, const M: usize, R: Rng>(
-    receiver: &mut Receiver,
+fn ot_ext_receive<Sender: ROTSender, T, const M: usize, R: Rng>(
+    sender: &mut Sender,
     choices: [bool; M],
     rng: &mut R,
 ) -> OTResult<[T; M]> {
+    // K OT for M bits messages where K is key length = 128.
+    // Ext receiver acts as an OT sender
+    // 1. create M * K matrix where all the values for i'th row are choice bit b_i.
+    let b_matrix = choices.iter().map(|&b_i| vec![b_i; K]).collect::<Vec<_>>();
+
+    // 2. Sample random M * K matrix t_matrix to form share of b_matrix.
+    // t_matrix ^ u_matrix = b_matrix
+    let mut rng = thread_rng();
+    let t_matrix = (0..M).map(|_| {
+        let t_i: u128 = rng.gen();
+        let mut row = [false; 128];
+        row.iter_mut()
+            .enumerate()
+            .map(|(i, _)| (t_i >> i) & 1 == 1)
+            .collect::<Vec<_>>()
+    });
+
+    println!("t_matrix: {:?}", t_matrix);
+
     todo!()
 }
 
@@ -56,26 +81,25 @@ mod tests {
             let mut rng = thread_rng();
             let reader = BufReader::new(receiver.try_clone().unwrap());
             let writer = BufWriter::new(receiver);
-            let receiver_channel = Channel::new(reader, writer);
-            let mut ot_receiver = CO15Receiver::setup(receiver_channel).unwrap();
+            let sender_channel = Channel::new(reader, writer);
+            let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
             let choices: [bool; 10] = [
                 true, false, true, true, false, true, true, false, true, false,
             ];
 
             ot_ext_receive::<
-                CO15Receiver<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>,
+                CO15Sender<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>,
                 Block128,
                 10,
                 ThreadRng,
-            >(&mut ot_receiver, choices, &mut rng)
+            >(&mut ot_sender, choices, &mut rng)
         });
 
         // Prepare sender
-        let mut rng = thread_rng();
         let reader = BufReader::new(sender.try_clone().unwrap());
         let writer = BufWriter::new(sender);
-        let sender_channel = Channel::new(reader, writer);
-        let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
+        let receiver_channel = Channel::new(reader, writer);
+        let mut ot_receiver = CO15Receiver::setup(receiver_channel).unwrap();
         let values: [[Block128; 2]; 10] = [
             [Block128::from(1), Block128::from(100)],
             [Block128::from(1), Block128::from(100)],
@@ -89,10 +113,10 @@ mod tests {
             [Block128::from(1), Block128::from(100)],
         ];
         ot_ext_send::<
-            CO15Sender<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>,
+            CO15Receiver<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>,
             Block128,
             10,
-        >(&mut ot_sender, values)?;
+        >(&mut ot_receiver, values)?;
 
         let receiver_result = receiver_handle.join().unwrap();
         assert!(receiver_result.is_ok());
