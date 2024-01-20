@@ -8,7 +8,6 @@ use crate::types::IsZero;
 enum BlockError {}
 
 pub trait Block {
-    const BYTES_LEN: usize;
     // Encrypt in-place using AES256
     fn encrypt(&self, key: &[u8; 32]) -> Self;
 
@@ -17,6 +16,8 @@ pub trait Block {
     fn as_bytes(&self) -> Vec<u8>;
 
     fn from_bytes(bytes: &[u8]) -> Self;
+
+    fn bytes_len(&self) -> usize;
 }
 
 /// 128 bit data chunk
@@ -24,8 +25,6 @@ pub trait Block {
 pub struct Block128([u8; 16]);
 
 impl Block for Block128 {
-    const BYTES_LEN: usize = 16;
-
     fn encrypt(&self, key: &[u8; 32]) -> Self {
         let g_key = GenericArray::from(*key);
         let cipher = Aes256::new(&g_key);
@@ -63,6 +62,10 @@ impl Block for Block128 {
             Self(bytes[0..16].try_into().unwrap())
         }
     }
+
+    fn bytes_len(&self) -> usize {
+        16
+    }
 }
 
 impl IsZero for Block128 {
@@ -87,8 +90,6 @@ impl From<[u8; 16]> for Block128 {
 pub struct Block256([Block128; 2]);
 
 impl Block for Block256 {
-    const BYTES_LEN: usize = 32;
-
     fn encrypt(&self, key: &[u8; 32]) -> Self {
         let b_0 = self.0[0].encrypt(key);
         let b_1 = self.0[1].encrypt(key);
@@ -125,6 +126,10 @@ impl Block for Block256 {
             ])
         }
     }
+
+    fn bytes_len(&self) -> usize {
+        32
+    }
 }
 
 impl IsZero for Block256 {
@@ -147,10 +152,42 @@ impl From<[u8; 32]> for Block256 {
     }
 }
 
+// Impl arbitrary length Block
+impl Block for Vec<Block128> {
+    fn encrypt(&self, key: &[u8; 32]) -> Self {
+        self.iter().map(|b| b.encrypt(key)).collect::<Vec<_>>()
+    }
+
+    fn decrypt(&self, key: &[u8; 32]) -> Self {
+        self.iter().map(|b| b.decrypt(key)).collect::<Vec<_>>()
+    }
+
+    fn as_bytes(&self) -> Vec<u8> {
+        self.iter().flat_map(|b| b.as_bytes()).collect::<Vec<_>>()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytes
+            .chunks(16)
+            .map(Block128::from_bytes)
+            .collect::<Vec<_>>()
+    }
+
+    fn bytes_len(&self) -> usize {
+        self.len() * 16
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sha3::{Digest, Keccak256};
+
+    fn gen_key() -> [u8; 32] {
+        let mut hasher = Keccak256::default();
+        hasher.update(b"Key");
+        hasher.finalize().try_into().unwrap()
+    }
 
     #[test]
     fn test_cast_block256() {
@@ -174,15 +211,25 @@ mod tests {
     #[test]
     fn test_block128_encrypt_decrypt() {
         let block = Block128::from_bytes(&[1u8; 16]);
-        let key = {
-            let mut hasher = Keccak256::default();
-            hasher.update(b"Key");
-            hasher.finalize()
-        };
+        let key = gen_key();
 
-        let encrypted = block.encrypt(&key.into());
-        let decrypted = encrypted.decrypt(&key.into());
+        let encrypted = block.encrypt(&key);
+        let decrypted = encrypted.decrypt(&key);
 
         assert_eq!(decrypted, block);
+    }
+
+    #[test]
+    fn test_block_vec() {
+        let blocks = vec![
+            Block128::from_bytes(&[1u8; 16]),
+            Block128::from_bytes(&[0u8; 16]),
+        ];
+
+        let key = gen_key();
+        let encrypted = blocks.encrypt(&key);
+        let decrypted = encrypted.decrypt(&key);
+
+        assert_eq!(decrypted, blocks);
     }
 }

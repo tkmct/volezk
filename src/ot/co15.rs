@@ -160,8 +160,9 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
 
         let key = hasher.finalize();
 
+        let d = T::default();
         let ciphertexts: [T; N] = std::array::from_fn(|_| {
-            let mut bytes = vec![0u8; T::BYTES_LEN];
+            let mut bytes = vec![0u8; d.bytes_len()];
             // TODO: handle result correctly
             self.channel.read_bytes(&mut bytes).unwrap();
             T::from_bytes(&bytes)
