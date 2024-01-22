@@ -32,7 +32,7 @@ pub trait OTSender {
 pub trait OTReceiver {
     fn receive<const N: usize, T, R>(&mut self, choice: usize, rng: &mut R) -> OTResult<T>
     where
-        T: Block + Clone + Copy + Default,
+        T: Block + Clone + Default,
         R: Rng;
 }
 
