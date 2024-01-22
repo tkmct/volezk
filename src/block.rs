@@ -153,13 +153,21 @@ impl From<[u8; 32]> for Block256 {
 }
 
 // Impl arbitrary length Block
-impl Block for Vec<Block128> {
+impl<const L: usize> Block for [Block128; L] {
     fn encrypt(&self, key: &[u8; 32]) -> Self {
-        self.iter().map(|b| b.encrypt(key)).collect::<Vec<_>>()
+        self.iter()
+            .map(|b| b.encrypt(key))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 
     fn decrypt(&self, key: &[u8; 32]) -> Self {
-        self.iter().map(|b| b.decrypt(key)).collect::<Vec<_>>()
+        self.iter()
+            .map(|b| b.decrypt(key))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 
     fn as_bytes(&self) -> Vec<u8> {
@@ -171,6 +179,8 @@ impl Block for Vec<Block128> {
             .chunks(16)
             .map(Block128::from_bytes)
             .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 
     fn bytes_len(&self) -> usize {
@@ -221,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_block_vec() {
-        let blocks = vec![
+        let blocks = [
             Block128::from_bytes(&[1u8; 16]),
             Block128::from_bytes(&[0u8; 16]),
         ];

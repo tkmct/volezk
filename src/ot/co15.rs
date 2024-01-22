@@ -11,7 +11,7 @@ use crate::{block::*, channel::AbstractChannel, types::*};
 use super::{OTReceiver, OTResult, OTSender, ROTReceiver, ROTSender};
 
 pub struct CO15Sender<C: AbstractChannel> {
-    channel: C,
+    pub channel: C,
 
     y: Zp,
     s: G,
@@ -56,12 +56,12 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
         let mut hasher = Keccak256::default();
         hasher.update(s_buff);
         hasher.update(r_buff);
+        // println!("values len: {:?}", values.len());
 
         // Receive r from receiver
         // calculate keys using r
         // k_j = H (S,R )(yR − jT)
         for (i, v) in values.iter().enumerate() {
-            // for i in 0..N {
             let mut hasher = hasher.clone();
             let k = r * self.y - self.t * Zp::from(i as u32);
             let mut buff = Vec::new();
@@ -71,8 +71,9 @@ impl<C: AbstractChannel> OTSender for CO15Sender<C> {
             let key = hasher.finalize();
             let encrypted = v.encrypt(&key.into());
 
+            // println!("encrypetd len: {:?}", encrypted.as_bytes());
             // send ciphertext to receiver
-            self.channel.write_bytes(&encrypted.as_bytes()).unwrap();
+            self.channel.write_bytes(&encrypted.as_bytes())?;
             self.channel.flush()?;
         }
 
@@ -114,7 +115,7 @@ impl<C: AbstractChannel> ROTSender for CO15Sender<C> {
 }
 
 pub struct CO15Receiver<C: AbstractChannel> {
-    channel: C,
+    pub channel: C,
     s: G,
 }
 
@@ -130,7 +131,7 @@ impl<C: AbstractChannel> CO15Receiver<C> {
 impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
     fn receive<const N: usize, T, R>(&mut self, choice: usize, rng: &mut R) -> OTResult<T>
     where
-        T: Block + Clone + Copy + Default,
+        T: Block + Clone + Default,
         R: Rng,
     {
         // sample x from Z_p for N times
@@ -168,8 +169,12 @@ impl<C: AbstractChannel> OTReceiver for CO15Receiver<C> {
             T::from_bytes(&bytes)
         });
 
+        // ciphertexts.iter().for_each(|ciphertext| {
+        //     println!("ciphertexts len: {}", ciphertext.bytes_len());
+        // });
+
         // decipher the choice ciphertext
-        let dest = ciphertexts[choice];
+        let dest = ciphertexts[choice].clone();
         let res = dest.decrypt(&key.into());
         // TODO: handle the result
 
@@ -317,6 +322,42 @@ mod tests {
         let receiver_result = receiver_handle.join().unwrap();
         assert!(receiver_result.is_ok());
         assert_eq!(receiver_result.unwrap(), points[3]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ot_blocks() -> Result<(), Box<dyn std::error::Error>> {
+        let (sender, receiver) = UnixStream::pair().unwrap();
+
+        // Preapre receiver
+        let receiver_handle = thread::spawn(move || {
+            let mut rng = thread_rng();
+            let reader = BufReader::new(receiver.try_clone().unwrap());
+            let writer = BufWriter::new(receiver);
+            let receiver_channel = Channel::new(reader, writer);
+            let mut ot_receiver = CO15Receiver::setup(receiver_channel).unwrap();
+
+            let choice = 0;
+            ot_receiver.receive::<2, [Block128; 2], ThreadRng>(choice, &mut rng)
+        });
+
+        // Prepare sender
+        let mut rng = thread_rng();
+        let reader = BufReader::new(sender.try_clone().unwrap());
+        let writer = BufWriter::new(sender);
+        let sender_channel = Channel::new(reader, writer);
+        let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
+
+        let values: [[Block128; 2]; 2] = [
+            [Block128::from(1), Block128::from(100)],
+            [Block128::from(1), Block128::from(100)],
+        ];
+        ot_sender.send(values)?;
+
+        let receiver_result = receiver_handle.join().unwrap();
+        assert!(receiver_result.is_ok());
+        assert_eq!(receiver_result.unwrap(), values[0]);
 
         Ok(())
     }
