@@ -17,14 +17,14 @@ const K: usize = 2;
 // TODO: make this B generics cleaner
 fn ot_ext_send<
     Receiver: OTReceiver,
-    T,
+    T: Block,
     B: Block + Clone + Default,
     const M: usize,
     C: AbstractChannel,
 >(
     receiver: &mut Receiver,
     values: [[T; 2]; M],
-    channel: C,
+    channel: &mut C,
 ) -> OTResult<()> {
     // K OT for M bits messages where K is key length = 128.
     // Ext sender acts as an OT receiver
@@ -33,7 +33,7 @@ fn ot_ext_send<
     // let s_choices = (0..K).map(|_| rng.gen::<bool>()).collect::<Vec<_>>();
     //
     // sender supposed to receive t for 0-th column, u for 1-st column for testing
-    let s_choices = vec![false, true];
+    let s_choices = vec![true, false];
 
     println!("s: {:?}", s_choices);
     // println!("ot-ext-send M: {}", M);
@@ -45,14 +45,12 @@ fn ot_ext_send<
         let received = receiver.receive::<2, B, ThreadRng>(*s as usize, &mut rng)?;
         // println!("received {:?}", received);
         // convert received block back to M bit vec
-        // let bytes = &received.as_bytes()[0..(M / 8 + 1)];
         let bytes = &received.as_bytes()[0..(M / 8 + 1)];
         println!("Received: {:?}", bytes);
 
         for j in 0..M {
             let l = j / 8;
             let byte = bytes[l];
-            // println!("byte, {}", byte >> (7 - i % 8) & 1);
 
             println!("{}-th bit of q is {}", j, byte >> (7 - j % 8) & 1);
             q_matrix[j][i] = (byte >> (7 - j % 8) & 1) != 0;
@@ -62,14 +60,13 @@ fn ot_ext_send<
     // compute M key pairs by hashing
     let keys = q_matrix
         .iter()
-        .zip(s_choices)
-        .map(|(row, s)| {
+        .map(|row| {
             let mut hasher_0 = Keccak256::default();
-            let mut hasher_1 = Keccak256::default();
             let mut k_0_bytes = vec![0u8; K];
-            let mut k_1_bytes = vec![0u8; K];
 
+            println!("compute key for k0");
             for (i, &bit) in row.iter().enumerate() {
+                println!("bit: {:?}", bit);
                 let byte = i / 8;
                 let shift = 7 - i % 8;
                 k_0_bytes[byte] |= (bit as u8) << shift;
@@ -77,8 +74,13 @@ fn ot_ext_send<
             hasher_0.update(k_0_bytes);
             let k0 = hasher_0.finalize();
 
-            for (i, &bit) in row.iter().enumerate() {
+            println!("compute key for k1");
+            let mut hasher_1 = Keccak256::default();
+            let mut k_1_bytes = vec![0u8; K];
+            for (i, (&bit, s)) in row.iter().zip(&s_choices).enumerate() {
+                println!("bit: {:?}, s: {:?}", bit, s);
                 let bit = bit ^ s;
+                println!("bit ^ s: {:?}", bit);
                 let byte = i / 8;
                 let shift = 7 - i % 8;
                 k_1_bytes[byte] |= (bit as u8) << shift;
@@ -90,8 +92,17 @@ fn ot_ext_send<
         })
         .collect::<Vec<_>>();
 
-    println!("q_matrix: {:?}", q_matrix);
-    // todo!()
+    // Send all the encrypted values
+    for (v, (k0, k1)) in values.iter().zip(keys) {
+        println!("Encryption Keys:");
+        println!("key0: {:?}", &k0[..10]);
+        println!("key1: {:?}", &k1[..10]);
+        channel.write_bytes(&v[0].encrypt(&k0.into()).as_bytes())?;
+        channel.flush()?;
+        channel.write_bytes(&v[1].encrypt(&k1.into()).as_bytes())?;
+        channel.flush()?;
+    }
+
     Ok(())
 }
 
@@ -100,7 +111,7 @@ fn ot_ext_send<
 /// B is a Block type to represent t, u, q matrix
 fn ot_ext_receive<
     Sender: OTSender,
-    T,
+    T: Block + Default + std::fmt::Debug,
     B: Block + Clone,
     const M: usize,
     C: AbstractChannel,
@@ -108,10 +119,10 @@ fn ot_ext_receive<
 >(
     sender: &mut Sender,
     choices: [bool; M],
-    channel: C,
+    channel: &mut C,
     rng: &mut R,
-    // ) -> OTResult<[T; M]> {
-) -> OTResult<()> {
+) -> OTResult<[T; M]> {
+    // ) -> OTResult<()> {
     // K OT for M-bits messages where K is key length = 128.
     // Ext receiver acts as an OT sender
     // 1. create M * K matrix where all the values for i'th row are choice bit b_i.
@@ -134,7 +145,7 @@ fn ot_ext_receive<
     //     .collect::<Vec<_>>();
 
     // For testing purpose
-    let t_matrix = vec![vec![true, false], vec![false, true]];
+    let t_matrix = vec![vec![true, true], vec![false, true]];
 
     println!("t_matrix: {:?}", t_matrix);
 
@@ -181,10 +192,46 @@ fn ot_ext_receive<
         // sender.send([t_block, u_block])?;
 
         sender.send([t_block, u_block])?;
-        println!("ot-ext-recv Send T and U");
     }
 
-    Ok(())
+    let mut result: Vec<T> = vec![];
+
+    for (t_row, b) in t_matrix.iter().zip(choices) {
+        // Receive M encrypted pair of values
+        // decrypt the appropriate one
+        // key is hash of t
+        let mut k_bytes = vec![0u8; K];
+        for (i, &bit) in t_row.iter().enumerate() {
+            let byte = i / 8;
+            let shift = 7 - i % 8;
+            k_bytes[byte] |= (bit as u8) << shift;
+        }
+
+        let mut hasher = Keccak256::default();
+        hasher.update(k_bytes);
+        let key = hasher.finalize();
+
+        println!("Decryption Key:");
+        println!("key: {:?}", &key[..10]);
+
+        let d = T::default();
+        let mut v0_bytes = vec![0u8; d.bytes_len()];
+        let mut v1_bytes = vec![0u8; d.bytes_len()];
+        channel.read_bytes(&mut v0_bytes)?;
+        channel.read_bytes(&mut v1_bytes)?;
+        if !b {
+            // choice is 0-th element
+            let v0_encrypted = T::from_bytes(&v0_bytes);
+            result.push(v0_encrypted.decrypt(&key.into()));
+        } else {
+            // choice is 1-st element
+            let v1_encrypted = T::from_bytes(&v1_bytes);
+            result.push(v1_encrypted.decrypt(&key.into()));
+        }
+    }
+
+    let return_values = result.try_into().unwrap();
+    Ok(return_values)
 }
 
 #[cfg(test)]
@@ -225,14 +272,14 @@ mod tests {
             let sender_channel = Channel::new(reader, writer);
             let mut ot_sender = CO15Sender::setup(sender_channel, &mut rng).unwrap();
             // TODO: fix later
-            let choices: [bool; 2] = [
+            let choices = [
                 true, false,
-                // true, true, false, true, true, false, true, false,
+                //  true, true, false, true, true, false, true, false,
             ];
 
             let reader = BufReader::new(ext_receiver_stream.try_clone().unwrap());
             let writer = BufWriter::new(ext_receiver_stream);
-            let ext_receiver_chan = Channel::new(reader, writer);
+            let mut ext_receiver_chan = Channel::new(reader, writer);
 
             ot_ext_receive::<
                 CO15Sender<Channel<BufReader<UnixStream>, BufWriter<UnixStream>>>,
@@ -242,7 +289,7 @@ mod tests {
                 2,
                 Channel<BufReader<UnixStream>, BufWriter<UnixStream>>,
                 ThreadRng,
-            >(&mut ot_sender, choices, ext_receiver_chan, &mut rng)
+            >(&mut ot_sender, choices, &mut ext_receiver_chan, &mut rng)
         });
 
         // Prepare sender
@@ -275,15 +322,15 @@ mod tests {
             [Block128; 1],
             2,
             Channel<BufReader<UnixStream>, BufWriter<UnixStream>>,
-        >(&mut ot_receiver, values, ext_sender_chan)?;
+        >(&mut ot_receiver, values, &mut ext_sender_chan)?;
 
         let receiver_result = receiver_handle.join().unwrap();
         assert!(receiver_result.is_ok());
 
         // TODO: fix later
         let expected_result = [
-            Block128::from(1),
             Block128::from(100),
+            Block128::from(1),
             // Block128::from(1),
             // Block128::from(1),
             // Block128::from(100),
@@ -294,7 +341,7 @@ mod tests {
             // Block128::from(100),
         ];
 
-        // assert_eq!(receiver_result.unwrap(), expected_result);
+        assert_eq!(receiver_result.unwrap(), expected_result);
 
         Ok(())
     }
