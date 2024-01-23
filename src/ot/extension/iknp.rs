@@ -89,7 +89,7 @@ pub fn ot_ext_send<
 /// Const M is number of items to receive from sender
 /// T is a type of value to receive from sender
 /// B is a Block type to represent t, u, q matrix
-fn ot_ext_receive<
+pub fn ot_ext_receive<
     Sender: OTSender,
     T: Block + Default + std::fmt::Debug,
     B: Block + Clone,

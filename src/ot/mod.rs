@@ -4,8 +4,8 @@ use ark_std::rand::Rng;
 
 use crate::{block::Block, channel::ChannelError};
 
-mod co15;
-mod extension;
+pub mod co15;
+pub mod extension;
 
 #[derive(thiserror::Error, Debug)]
 pub enum OTError {

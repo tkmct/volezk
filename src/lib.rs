@@ -1,7 +1,9 @@
 //! Implement vole based zkp
+pub mod block;
+pub mod ot;
 
-mod block;
 mod channel;
-mod ot;
 mod types;
 mod vole;
+
+pub use channel::{AbstractChannel, Channel};
