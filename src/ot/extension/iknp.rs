@@ -46,9 +46,10 @@ pub fn ot_ext_send<
     }
 
     // compute M key pairs by hashing
-    let keys = q_matrix
+    let ciphertexts = q_matrix
         .iter()
-        .map(|row| {
+        .zip(values)
+        .map(|(row, v)| {
             let mut hasher_0 = Keccak256::default();
             let mut k_0_bytes = vec![0u8; K];
 
@@ -59,6 +60,7 @@ pub fn ot_ext_send<
             }
             hasher_0.update(k_0_bytes);
             let k0 = hasher_0.finalize();
+            let v0 = v[0].encrypt(&k0.into()).as_bytes();
 
             let mut hasher_1 = Keccak256::default();
             let mut k_1_bytes = vec![0u8; K];
@@ -70,16 +72,17 @@ pub fn ot_ext_send<
             }
             hasher_1.update(k_1_bytes);
             let k1 = hasher_1.finalize();
+            let v1 = v[1].encrypt(&k1.into()).as_bytes();
 
-            (k0, k1)
+            (v0, v1)
         })
         .collect::<Vec<_>>();
 
     // Send all the encrypted values
-    for (v, (k0, k1)) in values.iter().zip(keys) {
-        channel.write_bytes(&v[0].encrypt(&k0.into()).as_bytes())?;
+    for c in ciphertexts.iter() {
+        channel.write_bytes(&c.0)?;
         channel.flush()?;
-        channel.write_bytes(&v[1].encrypt(&k1.into()).as_bytes())?;
+        channel.write_bytes(&c.1)?;
         channel.flush()?;
     }
 
