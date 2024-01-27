@@ -17,6 +17,7 @@ impl<C: AbstractChannel, Sender: OTSender> VoleSender<C, Sender> {
         Self { channel, ot_sender }
     }
 
+    /// Random vole send
     fn send(&mut self) {
         todo!()
     }

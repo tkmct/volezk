@@ -6,6 +6,7 @@ use crate::{block::Block, channel::ChannelError};
 
 pub mod co15;
 pub mod extension;
+pub mod kos15;
 
 #[derive(thiserror::Error, Debug)]
 pub enum OTError {
